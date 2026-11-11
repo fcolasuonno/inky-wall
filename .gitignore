@@ -1,0 +1,22 @@
+# PlatformIO build artefacts
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Credentials: copy secrets.h.example to secrets.h (never commit the real one)
+firmware/src/secrets.h
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Firmware images
+*.bin
+*.elf
+*.map
+
+# Python
+__pycache__/
+*.pyc
