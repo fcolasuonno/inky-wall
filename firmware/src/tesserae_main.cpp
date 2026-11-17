@@ -526,11 +526,11 @@ void setup() {
     // than advertised (retry backoff), which is the safe direction.
     publishHeartbeat(computeNextSleep());
 
-    // Button A / reset: ask for the next frame on this same wake, while the MQTT
-    // session is still up, so the paint below uses the stepped URL.
+    // Button A / reset: just log it; no advance. The wake is enough —
+    // if the retained frame URL changed while we slept, the normal
+    // "URL differs from lastUrl" check below will repaint.
     if (isButtonWake()) {
-        Serial.println("[main] button press -> advance");
-        if (gotFrame && frameUrl[0]) advanceFrame();
+        Serial.println("[main] button wake (no advance)");
     }
     mqtt.disconnect();
 
