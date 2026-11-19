@@ -94,6 +94,36 @@ The post-upload RTS reset does not take on this USB-JTAG board, hence the manual
 power cycle. `pio device monitor` refuses piped stdin; use MQTT status or a
 pyserial capture with `dtr`/`rts` cleared.
 
+## OTA flashing (ArduinoOTA, triggered on demand)
+
+The panel sleeps for hours, so the OTA window is opened on demand — never on a
+timer wake, and at no cost in normal operation. Either trigger works:
+
+- **Hold Button A for 5 seconds** while the panel wakes.
+- **Publish a one-shot retained MQTT command** to `tesserae/inky13/cmd/ota`
+  with payload `inky13-ota-enable`, then press the button briefly. The bundled
+  `tesserae-plugin/inky_ota/` admin plugin publishes this for you.
+
+On either trigger the firmware clears the retained command, keeps WiFi awake,
+and holds an ArduinoOTA window for 3 minutes. Then, from a laptop on the LAN:
+
+```bash
+INKY_OTA_PASSWORD=<password> ~/.platformio-venv/bin/pio run -e tesserae-ota -t upload
+```
+
+If you prefer MQTT-only, copy `tesserae-plugin/inky_ota/` into the Tesserae
+server's `plugins/` folder and use its admin page. Equivalent manual command:
+
+```bash
+mosquitto_pub -t tesserae/inky13/cmd/ota -m inky13-ota-enable -r
+```
+
+`<password>` is `OTA_PASSWORD` in `src/secrets.h` (see `secrets.h.example`).
+The plugin's command token must match `OTA_CMD_TOKEN` in `tesserae_config.h`.
+A successful upload reboots into the new image; if nothing is uploaded, the
+board sleeps again when the window closes. This is plain LAN flashing — no
+Tesserae signing, canary or reporting.
+
 ## Runtime & battery
 
 - a wake costs a few seconds of radio; an unchanged URL means heartbeat only

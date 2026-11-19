@@ -14,6 +14,14 @@
 #define TOPIC_CONFIG            "tesserae/" TESSERAE_DEVICE_ID "/config"
 #define TOPIC_STATUS            "tesserae/" TESSERAE_DEVICE_ID "/status"
 
+// One-shot OTA trigger, published retained by the Tesserae admin plugin.
+// The command is consumed (cleared) on the first wake that sees it.
+#define TOPIC_CMD_OTA           "tesserae/" TESSERAE_DEVICE_ID "/cmd/ota"
+#define OTA_CMD_TOKEN           "inky13-ota-enable"
+#define OTA_HOSTNAME            "inky13-ota"
+#define OTA_WINDOW_MS           (180000UL)   // 3 minutes; ArduinoOTA reboots on success
+#define OTA_HOLD_MS             (5000UL)     // hold Button A this long at wake to open OTA
+
 #define FW_VERSION              "inky13-tesserae-0.1"
 
 // ---- panel scan geometry -----------------------------------------------------

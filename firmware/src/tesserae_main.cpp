@@ -17,6 +17,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Preferences.h>
+#include <ArduinoOTA.h>
 #include <esp_sleep.h>
 #include <driver/rtc_io.h>
 #include <ctype.h>
@@ -46,6 +47,7 @@ static int battPct = -1;
 
 static volatile bool gotFrame = false;
 static volatile bool gotConfig = false;
+static volatile bool otaRequested = false;
 static char frameUrl[200] = "";
 static uint32_t cfgSleep = 0;
 
@@ -162,6 +164,17 @@ static void mqttCallback(char* topic, byte* payload, unsigned int len) {
             gotConfig = true;
             Serial.printf("[mqtt] config sleep_interval_s=%ld\n", (long)v);
         }
+    } else if (strcmp(topic, TOPIC_CMD_OTA) == 0) {
+        // Retained one-shot command from the Tesserae admin plugin. An empty
+        // payload is the clear message (including our own), so it never
+        // re-arms the window.
+        if (len == 0) {
+            otaRequested = false;
+        } else if (len == strlen(OTA_CMD_TOKEN) &&
+                   memcmp(payload, OTA_CMD_TOKEN, len) == 0) {
+            otaRequested = true;
+            Serial.println("[ota] command received");
+        }
     }
 }
 
@@ -185,6 +198,7 @@ static bool connectMQTT() {
     }
     mqtt.subscribe(TOPIC_FRAME, 1);
     mqtt.subscribe(TOPIC_CONFIG, 1);
+    mqtt.subscribe(TOPIC_CMD_OTA, 1);
     return true;
 }
 
@@ -233,6 +247,54 @@ static void waitForButtonFrame(uint32_t timeoutMs) {
         }
         delay(10);
     }
+}
+
+// ---- OTA window --------------------------------------------------------------
+
+// Second trigger alongside the MQTT command: hold Button A for OTA_HOLD_MS
+// while waking. The ext1 wake fires immediately on press, so the pin is still
+// LOW when setup() runs; measure the hold before doing anything else. A short
+// press is the normal wake and leaves OTA alone.
+static bool longPressOta() {
+#if PIN_BUTTON >= 0
+    if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_EXT1) return false;
+    pinMode(PIN_BUTTON, INPUT_PULLUP);
+    uint32_t t0 = millis();
+    while (digitalRead(PIN_BUTTON) == LOW &&
+           millis() - t0 < OTA_HOLD_MS + 1000UL) {
+        delay(20);
+    }
+    uint32_t held = millis() - t0;
+    if (held >= OTA_HOLD_MS) {
+        Serial.printf("[btn] long press %lums -> OTA\n", (unsigned long)held);
+        return true;
+    }
+#endif
+    return false;
+}
+
+// Opened by the one-shot retained MQTT command or a long button press. WiFi is already up; the
+// MQTT session is closed by the caller first. ArduinoOTA.handle() must be
+// called often, so do no panel work in this loop. A successful upload reboots
+// the chip into the new image before the window can time out.
+static void runOtaWindow() {
+    ArduinoOTA.setHostname(OTA_HOSTNAME);
+    ArduinoOTA.setPassword(OTA_PASSWORD);
+    ArduinoOTA.onStart([]() { Serial.println("[ota] upload started"); });
+    ArduinoOTA.onEnd([]() { Serial.println("[ota] upload finished"); });
+    ArduinoOTA.onError([](ota_error_t e) {
+        Serial.printf("[ota] error %u\n", (unsigned)e);
+    });
+    ArduinoOTA.begin();
+
+    Serial.printf("[ota] window open for %lus\n", OTA_WINDOW_MS / 1000);
+    uint32_t t0 = millis();
+    while (millis() - t0 < OTA_WINDOW_MS) {
+        ArduinoOTA.handle();
+        delay(10);
+    }
+    ArduinoOTA.end();
+    Serial.println("[ota] window closed");
 }
 
 // ---- heartbeat ---------------------------------------------------------------
@@ -501,6 +563,19 @@ void setup() {
     // is the pre-paint estimate: on a failed paint the device wakes *earlier*
     // than advertised (retry backoff), which is the safe direction.
     publishHeartbeat(computeNextSleep());
+
+    // OTA takes priority, from either trigger: the one-shot MQTT command or a
+    // long button press. Consume the command, drop MQTT, and hold a bounded
+    // ArduinoOTA window. A successful upload reboots into the new image; if
+    // nothing is uploaded, go back to sleep when the window closes.
+    if (longPressOta()) otaRequested = true;
+    if (otaRequested) {
+        mqtt.publish(TOPIC_CMD_OTA, "", true);   // one-shot: clear the retained command
+        mqtt.disconnect();
+        runOtaWindow();
+        goToSleep();
+        return;
+    }
 
     // Button A / reset: no advance. Wait briefly only if the retained URL is
     // still the one we already painted - a push may still be rendering on the
