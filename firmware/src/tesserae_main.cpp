@@ -215,6 +215,15 @@ static void waitRetained() {
         mqtt.loop();
         delay(2);
     }
+    // Fixed drain: the loops above stop as soon as their flag is set, which
+    // can be before the last retained message (e.g. the OTA command) has been
+    // delivered. PubSubClient processes one message per loop() call. A short
+    // unconditional drain makes every retained topic reach its callback.
+    t0 = millis();
+    while (mqtt.connected() && millis() - t0 < 500) {
+        mqtt.loop();
+        delay(2);
+    }
 }
 
 // ---- button / reset press ----------------------------------------------------
