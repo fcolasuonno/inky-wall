@@ -24,7 +24,7 @@
 // Inky Impression Button A sits on physical pin 29 (BCM5). It is not used by the
 // display wiring, so a wire from header pin 29 to the FireBeetle's D5 pad
 // (ESP32-S3 GPIO7, RTC-capable, not a strapping pin) turns it into a deep-sleep
-// wake source: press -> next image. -1 disables the feature. Do NOT use
+// wake source: press -> wakes to check for a new frame. -1 disables the feature. Do NOT use
 // NONE/Button C (header pin 36 is CS1 here) or Button D (BCM24, pin 18).
 #define PIN_BUTTON          7    // D5 / GPIO7, active LOW (switch to GND)
 

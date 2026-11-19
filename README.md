@@ -4,9 +4,19 @@ Battery-first ESP32-S3 firmware for a FireBeetle 2 (N4, no usable PSRAM) driving
 a Pimoroni Inky Impression 13.3" Spectra 6 panel as a **Tesserae** MQTT device.
 Tesserae renders and hosts the images; this repo is only the device side.
 
-- **One image a day**: the panel wakes, picks up the retained frame URL, paints
-  if it changed, sleeps for the server-configured interval (86400 s).
-- **Panel Button A** advances to the next image on the spot.
+- **One image a day**: the panel wakes on the server-configured interval
+  (86400 s), picks up the retained frame URL, paints if it changed, sleeps.
+  Tesserae uses the reported `next_sleep_s` to render just before each predicted
+  wake (smart sync); the interval is a ceiling, not a fixed publish schedule.
+- **Panel Button A only wakes the board.** On wake it checks the retained frame
+  URL: if Tesserae pushed something new it repaints, otherwise it goes straight
+  back to sleep. It does **not** advance the lineup or request a re-render. If
+  a push is still rendering, a button wake waits a few seconds for the new URL
+  (leaving as soon as it arrives); a wake with an already-current frame waits
+  no longer than a normal check-in.
+- **Scheduling is server-side**: push a dashboard/image from Tesserae, and the
+  Gallery widget's lineup steps at the configured times. The panel never decides
+  what "next" means.
 - Nothing talks to Tesserae Cloud: the panel points at a self-hosted Tesserae
   instance, uses your own Mosquitto broker, and gets its Home Assistant
   discovery entities from Tesserae.
@@ -26,16 +36,18 @@ Credentials are not in the repo: `firmware/src/secrets.h` is gitignored, and
 | `tesserae/<id>/frame/bin` | in, retained | `{"url": "http://…/<digest>.bin"}` |
 | `tesserae/<id>/config` | in, retained | `{"sleep_interval_s": 86400}` |
 | `tesserae/<id>/status` | out, retained | heartbeat: rssi, ip, panel size, `wake_reason`, `last_paint`, `next_sleep_s`, … |
-| `tesserae/ha/dev/<id>/cmd/action` | out | `next` (step the lineup), `refresh` (re-render the page) |
 
 The frame is a 4 bpp image, 1200×1600, 600 bytes per row: rows arrive as one
 continuous stream and are split on the fly, left 300 bytes to CS0 and right 300
 to CS1, so it is downloaded once and never buffered (no PSRAM on this module).
 
 `wake_reason` is `timer` for the daily wake, `button` for a Button A press, and
-`poweron`/`usb`/`ext`/`sw`/`panic` for resets. Any non-timer wake asks Tesserae
-for the next frame (`next`, then `refresh` after `BUTTON_WAIT_MS`), so the
-board's reset button works as a no-solder fallback.
+`poweron`/`usb`/`ext`/`sw`/`panic` for resets. Every wake follows the same path:
+publish the heartbeat, read the retained frame URL, paint only if it differs
+from the last one, then sleep. Button/reset wakes publish no commands — they
+just let you pick up a frame Tesserae has already pushed. Stepping a Gallery
+lineup is Tesserae's job, timed from the lineup's schedule and smart-synced to
+the `next_sleep_s` in the heartbeat.
 
 ## Wiring (Pi header BCM → FireBeetle GPIO)
 
@@ -84,10 +96,14 @@ pyserial capture with `dtr`/`rts` cleared.
 
 ## Runtime & battery
 
-- a timer wake costs a few seconds of radio (unchanged URL = heartbeat only, no
-  HTTP, no panel refresh); a button press adds ~31 s of panel refresh
+- a wake costs a few seconds of radio; an unchanged URL means heartbeat only
+  (no HTTP, no panel refresh). A changed URL adds ~30 s of panel refresh, on a
+  timer wake or a button wake alike. A button press is only expensive when
+  Tesserae has actually pushed a new frame.
 - the wake cadence comes from Tesserae (`sleep_interval_s`, currently a day),
-  with 15/30/60 min retry backoff if a download or paint fails
+  with 15/30/60 min retry backoff if a download or paint fails. Tesserae's smart
+  sync uses the heartbeat's `next_sleep_s` to time renders just before the
+  predicted wake rather than on a fixed cadence.
 - battery telemetry is off (`BATTERY_ADC_PIN -1`): the board has no sense net,
   so a 100k/100k divider from BAT+ to A0 (GPIO4) would be needed first; see
   `config.h`

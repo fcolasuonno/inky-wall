@@ -13,9 +13,6 @@
 #define TOPIC_FRAME             "tesserae/" TESSERAE_DEVICE_ID "/frame/bin"
 #define TOPIC_CONFIG            "tesserae/" TESSERAE_DEVICE_ID "/config"
 #define TOPIC_STATUS            "tesserae/" TESSERAE_DEVICE_ID "/status"
-// Tesserae's HA command surface: "next" steps the lineup, "refresh" forces a
-// re-render of the current page. Used by the panel button / reset press.
-#define TOPIC_CMD_ACTION        "tesserae/ha/dev/" TESSERAE_DEVICE_ID "/cmd/action"
 
 #define FW_VERSION              "inky13-tesserae-0.1"
 
@@ -44,11 +41,12 @@
 #define WIFI_TIMEOUT_MS         25000
 #define MQTT_TIMEOUT_MS         8000
 #define RETAINED_WAIT_MS        6000
-// A button wake waits this long for the server to publish the stepped frame.
-// Only paid on a button/reset press, never on the daily timer wake. A refresh
-// render takes ~1-3 s, so 12 s covers it with margin while keeping a no-op
-// "next" from burning the full window before the refresh fallback.
-#define BUTTON_WAIT_MS          12000
+// A button/reset wake may beat Tesserae's render: the heartbeat itself can be
+// what triggers a smart-sync render, and the new URL lands a moment later. If
+// the retained URL still matches the last painted one, keep the MQTT session
+// open at most this long and leave as soon as it changes. Timer wakes never
+// wait (they carry next_sleep_s, so the server renders ahead of them).
+#define BUTTON_FRAME_WAIT_MS    10000
 #define HTTP_TIMEOUT_MS         30000
 
 // Persisted across deep sleep (RTC) and across power loss (NVS).

@@ -207,57 +207,33 @@ static void waitRetained() {
 
 // Panel Button A (GPIO7, see PIN_BUTTON) is armed as an ext1 wake source, so a
 // press wakes the chip like a reset does. Any wake that is not the deep-sleep
-// timer therefore counts as a press: the panel asks Tesserae to move on and
-// repaints whatever comes back on the same wake. Tesserae's HA command topic is
-// the only "next" surface a pure MQTT device has (the REST button path in the
-// esp32_client contract needs a device token and an extra HTTP session).
+// timer therefore counts as a press. The press itself is only a wake: what to
+// show is decided by Tesserae's lineup/scheduler, delivered as the retained
+// frame URL. No command is published back to the server.
 static bool isButtonWake() {
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1) return true;
     return esp_reset_reason() != ESP_RST_DEEPSLEEP;
 }
 
-static void publishAction(const char* action) {
-    if (!mqtt.connected()) return;
-    if (mqtt.publish(TOPIC_CMD_ACTION, action, false)) {
-        Serial.printf("[cmd] %s\n", action);
-    } else {
-        Serial.printf("[cmd] %s failed\n", action);
-    }
-}
-
-// Polls the retained frame topic until the URL differs from `baseUrl`.
-static bool waitNewFrame(const char* baseUrl, uint32_t timeoutMs) {
+// A button press can race Tesserae's render: publishing the heartbeat is what
+// can trigger a smart-sync render, and the new frame URL arrives a moment
+// later. If the URL is already new, return immediately (no extra awake time);
+// otherwise keep looping MQTT until it changes or the budget runs out. Timer
+// wakes never call this - they report next_sleep_s so the server renders
+// before they wake.
+static void waitForButtonFrame(uint32_t timeoutMs) {
+    if (gotFrame && frameUrl[0] && strcmp(frameUrl, lastUrl) != 0) return;
     uint32_t t0 = millis();
     while (mqtt.connected() && millis() - t0 < timeoutMs) {
         mqtt.loop();
-        if (gotFrame && frameUrl[0] && strcmp(frameUrl, baseUrl) != 0) {
-            Serial.printf("[cmd] new frame after %lums\n",
+        if (gotFrame && frameUrl[0] && strcmp(frameUrl, lastUrl) != 0) {
+            Serial.printf("[btn] new frame after %lums\n",
                           (unsigned long)(millis() - t0));
-            return true;
+            return;
         }
-        delay(5);
+        delay(10);
     }
-    return false;
 }
-
-// One step of whatever the display follows (lineup / rotation). A single-dashboard
-// lineup has nowhere to step to, so fall back to a forced re-render, which is
-// what advances a sequential Gallery widget to the next photo.
-static bool advanceFrame() {
-    char baseUrl[sizeof(frameUrl)];
-    strncpy(baseUrl, frameUrl, sizeof(baseUrl));
-    baseUrl[sizeof(baseUrl) - 1] = '\0';
-
-    publishAction("next");
-    if (waitNewFrame(baseUrl, BUTTON_WAIT_MS)) return true;
-
-    publishAction("refresh");
-    if (waitNewFrame(baseUrl, BUTTON_WAIT_MS)) return true;
-
-    Serial.println("[cmd] no new frame (is HA discovery enabled?)");
-    return false;
-}
-
 
 // ---- heartbeat ---------------------------------------------------------------
 
@@ -526,11 +502,12 @@ void setup() {
     // than advertised (retry backoff), which is the safe direction.
     publishHeartbeat(computeNextSleep());
 
-    // Button A / reset: just log it; no advance. The wake is enough —
-    // if the retained frame URL changed while we slept, the normal
-    // "URL differs from lastUrl" check below will repaint.
+    // Button A / reset: no advance. Wait briefly only if the retained URL is
+    // still the one we already painted - a push may still be rendering on the
+    // server. Normal case (frame already published) costs no extra time.
     if (isButtonWake()) {
         Serial.println("[main] button wake (no advance)");
+        waitForButtonFrame(BUTTON_FRAME_WAIT_MS);
     }
     mqtt.disconnect();
 
