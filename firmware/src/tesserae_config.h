@@ -22,7 +22,7 @@
 #define OTA_WINDOW_MS           (180000UL)   // 3 minutes; ArduinoOTA reboots on success
 #define OTA_HOLD_MS             (5000UL)     // hold Button A this long at wake to open OTA
 
-#define FW_VERSION              "inky13-tesserae-0.1"
+#define FW_VERSION              "inky13-tesserae-0.2"
 
 // ---- panel scan geometry -----------------------------------------------------
 // Tesserae packs at the panel's firmware-native row stride. The Inky glass is

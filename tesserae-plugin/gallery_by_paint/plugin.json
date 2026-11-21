@@ -1,0 +1,38 @@
+{
+  "tesserae_compat": "1.x",
+  "name": "Gallery by paint",
+  "version": "0.1.0",
+  "kind": "admin",
+  "description": "Pins one picture_gallery photo per confirmed panel paint. The panel reports paint_seq + painted_digest in its heartbeat; the plugin advances only when the painted frame was a push of the gallery page.",
+  "icon": "ph-images",
+  "supports": {
+    "sizes": []
+  },
+  "requires": [
+    "settings:plugin",
+    "filesystem:plugins/picture_gallery"
+  ],
+  "settings": [
+    {
+      "name": "device_id",
+      "type": "string",
+      "label": "Device id",
+      "default": "inky13",
+      "help": "The panel whose paint confirmations drive the lineup."
+    },
+    {
+      "name": "page_id",
+      "type": "string",
+      "label": "Gallery page id",
+      "default": "029ae3f66722",
+      "help": "The dashboard page containing the picture_gallery cell."
+    },
+    {
+      "name": "folder",
+      "type": "string",
+      "label": "Gallery folder",
+      "default": "wallpapers",
+      "help": "Internal gallery folder to rotate. External folders are read-only."
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "tesserae_compat": "1.x",
+  "name": "Inky tools",
+  "version": "0.1.0",
+  "kind": "admin",
+  "description": "Admin utilities for the inky13 panel: add gallery images by URL or clipboard paste, and publish the one-shot MQTT command that opens the ArduinoOTA window.",
+  "icon": "ph-toolbox",
+  "supports": {
+    "sizes": []
+  },
+  "requires": [
+    "network:*",
+    "settings:plugin",
+    "filesystem:plugins/picture_gallery"
+  ],
+  "settings": [
+    {
+      "name": "device_id",
+      "type": "string",
+      "label": "Device id",
+      "default": "inky13",
+      "help": "Tesserae device id / MQTT topic prefix for the OTA command."
+    },
+    {
+      "name": "default_folder",
+      "type": "string",
+      "label": "Default gallery folder",
+      "default": "",
+      "help": "Folder id pre-selected on the import tab. Blank auto-selects the first gallery folder."
+    },
+    {
+      "name": "max_size_mb",
+      "type": "string",
+      "label": "Max image size (MB)",
+      "default": "20",
+      "help": "Cap on bytes fetched from a URL or received from the clipboard."
+    },
+    {
+      "name": "allowed_hosts",
+      "type": "string",
+      "label": "Allowed URL hosts (optional)",
+      "default": "",
+      "help": "Comma-separated hostnames allowed for URL imports. Blank allows any host except local/special addresses."
+    },
+    {
+      "name": "token",
+      "type": "string",
+      "label": "OTA command token",
+      "default": "inky13-ota-enable",
+      "secret": true,
+      "help": "Must match OTA_CMD_TOKEN in the firmware (tesserae_config.h)."
+    }
+  ]
+}

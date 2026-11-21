@@ -35,14 +35,17 @@ Credentials are not in the repo: `firmware/src/secrets.h` is gitignored, and
 |---|---|---|
 | `tesserae/<id>/frame/bin` | in, retained | `{"url": "http://…/<digest>.bin"}` |
 | `tesserae/<id>/config` | in, retained | `{"sleep_interval_s": 86400}` |
-| `tesserae/<id>/status` | out, retained | heartbeat: rssi, ip, panel size, `wake_reason`, `last_paint`, `next_sleep_s`, … |
+| `tesserae/<id>/status` | out, retained | heartbeat: rssi, ip, panel size, `wake_reason`, `last_paint`, `next_sleep_s`, `paint_seq`, `painted_digest`, … |
 
 The frame is a 4 bpp image, 1200×1600, 600 bytes per row: rows arrive as one
 continuous stream and are split on the fly, left 300 bytes to CS0 and right 300
 to CS1, so it is downloaded once and never buffered (no PSRAM on this module).
 
 `wake_reason` is `timer` for the daily wake, `button` for a Button A press, and
-`poweron`/`usb`/`ext`/`sw`/`panic` for resets. Every wake follows the same path:
+`poweron`/`usb`/`ext`/`sw`/`panic` for resets. `paint_seq` increments on each
+successful refresh (persisted in NVS) and `painted_digest` is the digest from the
+frame URL just painted — the `gallery_by_paint` server plugin uses these to
+advance a photo only after the panel actually displayed it. Every wake follows the same path:
 publish the heartbeat, read the retained frame URL, paint only if it differs
 from the last one, then sleep. Button/reset wakes publish no commands — they
 just let you pick up a frame Tesserae has already pushed. Stepping a Gallery
@@ -102,7 +105,7 @@ timer wake, and at no cost in normal operation. Either trigger works:
 - **Hold Button A for 5 seconds** while the panel wakes.
 - **Publish a one-shot retained MQTT command** to `tesserae/inky13/cmd/ota`
   with payload `inky13-ota-enable`, then press the button briefly. The bundled
-  `tesserae-plugin/inky_ota/` admin plugin publishes this for you.
+  `tesserae-plugin/inky_tools/` admin plugin publishes this for you (OTA tab).
 
 On either trigger the firmware clears the retained command, keeps WiFi awake,
 and holds an ArduinoOTA window for 3 minutes. Then, from a laptop on the LAN:
@@ -111,8 +114,8 @@ and holds an ArduinoOTA window for 3 minutes. Then, from a laptop on the LAN:
 INKY_OTA_PASSWORD=<password> ~/.platformio-venv/bin/pio run -e tesserae-ota -t upload
 ```
 
-If you prefer MQTT-only, copy `tesserae-plugin/inky_ota/` into the Tesserae
-server's `plugins/` folder and use its admin page. Equivalent manual command:
+If you prefer MQTT-only, copy `tesserae-plugin/inky_tools/` into the Tesserae
+server's `marketplace/` folder and use its OTA tab. Equivalent manual command:
 
 ```bash
 mosquitto_pub -t tesserae/inky13/cmd/ota -m inky13-ota-enable -r

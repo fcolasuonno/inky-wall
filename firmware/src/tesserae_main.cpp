@@ -35,6 +35,7 @@ RTC_DATA_ATTR uint8_t paintFails = 0;
 RTC_DATA_ATTR char lastUrl[200] = "";
 RTC_DATA_ATTR char lastPaint[8] = "";
 RTC_DATA_ATTR uint32_t lastPaintMs = 0;
+RTC_DATA_ATTR uint32_t paintSeq = 0;   // increments on each successful panel refresh
 
 static WiFiClient net;
 static PubSubClient mqtt(net);
@@ -114,6 +115,7 @@ static void loadState() {
     prefs.begin(NVS_NAMESPACE, true);
     String url = prefs.getString("url", "");
     sleepS = prefs.getULong("sleep_s", 0);
+    paintSeq = prefs.getULong("paint_seq", 0);
     prefs.end();
 
     strncpy(lastUrl, url.c_str(), sizeof(lastUrl) - 1);
@@ -126,6 +128,7 @@ static void loadState() {
 static void saveUrl(const char* url) {
     prefs.begin(NVS_NAMESPACE, false);
     prefs.putString("url", url);
+    prefs.putULong("paint_seq", paintSeq);
     prefs.end();
 }
 
@@ -335,8 +338,22 @@ static uint32_t computeNextSleep() {
     return s;
 }
 
+// Digest of the last successfully painted frame, taken from its URL
+// (…/renders/<digest>.bin). Reported in the heartbeat so a server plugin can
+// tell *which* frame the panel displayed, not just that it painted something.
+static const char* lastFrameDigest() {
+    static char digest[24];
+    digest[0] = '\0';
+    const char* slash = strrchr(lastUrl, '/');
+    const char* p = slash ? slash + 1 : lastUrl;
+    size_t i = 0;
+    while (*p && *p != '.' && i < sizeof(digest) - 1) digest[i++] = *p++;
+    digest[i] = '\0';
+    return digest;
+}
+
 static void publishHeartbeat(uint32_t nextSleep) {
-    char body[420];
+    char body[512];
     int n = snprintf(body, sizeof(body), "{");
 
     if (battPct >= 0) {
@@ -362,6 +379,18 @@ static void publishHeartbeat(uint32_t nextSleep) {
     if (paintFails > 0 && n > 0 && (size_t)n < sizeof(body)) {
         n += snprintf(body + n, sizeof(body) - (size_t)n,
                       ",\"paint_failures\":%u", (unsigned)paintFails);
+    }
+    // Paint confirmation for the gallery-by-paint plugin. The heartbeat is
+    // sent before this wake's paint, so these describe the previous refresh:
+    // that is exactly when the server should prepare the image after it.
+    if (n > 0 && (size_t)n < sizeof(body)) {
+        n += snprintf(body + n, sizeof(body) - (size_t)n,
+                      ",\"paint_seq\":%lu", (unsigned long)paintSeq);
+        const char* digest = lastFrameDigest();
+        if (digest[0] && n > 0 && (size_t)n < sizeof(body)) {
+            n += snprintf(body + n, sizeof(body) - (size_t)n,
+                          ",\"painted_digest\":\"%s\"", digest);
+        }
     }
     if (n > 0 && (size_t)n < sizeof(body) - 2) {
         body[n++] = '}';
@@ -603,6 +632,7 @@ void setup() {
         Serial.println("[main] frame unchanged, skipping paint");
         paintFails = 0;
     } else if (fetchAndPaint(frameUrl)) {
+        paintSeq++;
         strncpy(lastUrl, frameUrl, sizeof(lastUrl) - 1);
         lastUrl[sizeof(lastUrl) - 1] = '\0';
         saveUrl(lastUrl);

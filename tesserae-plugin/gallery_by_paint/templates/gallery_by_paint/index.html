@@ -1,0 +1,54 @@
+{% extends "_base.html" %}
+{% from "_components.html" import card_head, button %}
+{% block title %}Gallery by paint, Tesserae{% endblock %}
+
+{% block main %}
+<div class="page-head">
+  <h1><i class="ph-bold ph-images" aria-hidden="true"></i> Gallery by paint</h1>
+  <p class="page-blurb">The gallery advances only after the panel confirms it painted the frame — one photo per actual display, not per render.</p>
+</div>
+
+<section class="card">
+  {{ card_head('Status', icon_name='info', level=2,
+               blurb='Device %s · page %s · folder %s'|format(device, page_id, folder)) }}
+  <div class="card-body">
+    <table class="table">
+      <tbody>
+        <tr><th>Currently pinned</th><td><code>{{ current or '(none)' }}</code></td></tr>
+        <tr><th>Position</th><td>{{ (index % images|length) + 1 if images else 0 }} / {{ images|length }}</td></tr>
+        <tr><th>Next after a confirmed paint</th><td><code>{{ next_image or '(none)' }}</code></td></tr>
+        <tr><th>Last paint sequence</th><td>{{ state.get('last_seq', '—') }}</td></tr>
+        <tr><th>Last painted digest</th><td><code>{{ state.get('last_digest') or '—' }}</code></td></tr>
+        <tr><th>Was it a gallery push?</th><td>{{ 'yes' if state.get('last_confirmed') else 'no / unknown' }}</td></tr>
+      </tbody>
+    </table>
+    {% if not images %}
+    <p class="field-help">No readable images in the configured gallery folder. Check the folder setting and Gallery → Widgets.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card">
+  {{ card_head('Controls', icon_name='sliders-horizontal', level=2) }}
+  <div class="card-body">
+    <div class="actions">
+      <form method="post" action="{{ url_for('gallery_by_paint.skip') }}">{{ button('Skip to next', icon='skip-forward') }}</form>
+      <form method="post" action="{{ url_for('gallery_by_paint.repin') }}">{{ button('Re-apply pin', variant='ghost', icon='arrow-counterclockwise') }}</form>
+      <form method="post" action="{{ url_for('gallery_by_paint.reset') }}" onsubmit="return confirm('Reset to the first photo?');">{{ button('Reset', variant='ghost danger', icon='arrow-clockwise') }}</form>
+    </div>
+  </div>
+</section>
+
+<section id="gbp-how" data-collapsible class="card">
+  {{ card_head('How it works', icon_name='question', level=2, collapse='gbp-how') }}
+  <div id="gbp-how-body" data-collapsible-body>
+    <ol>
+      <li>The plugin pins one photo in the gallery cell using the widget's <code>file</code> option (its own sequential cursor is bypassed).</li>
+      <li>Tesserae renders and pushes the page; the panel paints it on wake.</li>
+      <li>The next heartbeat reports <code>paint_seq</code> and <code>painted_digest</code>.</li>
+      <li>The plugin checks the event log: if that digest came from a push of this gallery page, the photo was consumed and the pin moves to the next one.</li>
+    </ol>
+    <p class="field-help">Button wakes that find no new frame don't increment <code>paint_seq</code>, so they cost no lineup steps. Pushes from the Send tab or another dashboard don't match the gallery page and are ignored. Requires firmware <code>inky13-tesserae-0.2</code> or later.</p>
+  </div>
+</section>
+{% endblock %}

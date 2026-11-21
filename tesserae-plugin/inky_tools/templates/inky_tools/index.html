@@ -1,0 +1,146 @@
+{% extends "_base.html" %}
+{% from "_components.html" import card_head, text_input, select_field, button %}
+{% block title %}Inky tools, Tesserae{% endblock %}
+
+{% block main %}
+<div class="page-head">
+  <h1><i class="ph-bold ph-toolbox" aria-hidden="true"></i> Inky tools</h1>
+  <p class="page-blurb">Add images to a Gallery folder by URL or paste, and open the panel's ArduinoOTA window.</p>
+</div>
+
+<style>
+  .it-tabs { display: flex; gap: 6px; margin: 0 0 16px; border-bottom: 1px solid var(--t-border); }
+  .it-tab { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px;
+            text-decoration: none; color: var(--t-fg-soft); border-bottom: 2px solid transparent; }
+  .it-tab:hover { color: var(--t-fg); }
+  .it-tab.is-active { color: var(--t-accent); border-bottom-color: var(--t-accent); font-weight: 700; }
+</style>
+<nav class="it-tabs" aria-label="Inky tools">
+  <a href="{{ url_for('inky_tools.index', tab='import') }}" class="it-tab{% if tab == 'import' %} is-active{% endif %}"><i class="ph ph-image-square" aria-hidden="true"></i> Gallery import</a>
+  <a href="{{ url_for('inky_tools.index', tab='ota') }}" class="it-tab{% if tab == 'ota' %} is-active{% endif %}"><i class="ph ph-upload-simple" aria-hidden="true"></i> OTA trigger</a>
+</nav>
+
+{% if tab == 'import' %}
+<form method="post" action="{{ url_for('inky_tools.import_save') }}" class="form">
+  <section id="it-target" data-collapsible class="card">
+    {{ card_head('Destination', icon_name='folder-plus', level=2,
+                 blurb='Pick an internal folder, or type a name to create a new one. External folders are read-only and are not listed.',
+                 collapse='it-target') }}
+    <div id="it-target-body" data-collapsible-body>
+      <div class="field-grid">
+        {{ select_field('it-folder', 'folder', 'Gallery folder', value=default_folder, options=folders) }}
+        {{ text_input('it-new-folder', 'new_folder', 'Or create a new folder',
+                      placeholder='vacation-2026',
+                      help='Lowercase letters, digits, hyphens and underscores. Leave blank to use the selected folder.') }}
+        {{ text_input('it-filename', 'filename', 'Filename (optional)',
+                      placeholder='sunset.jpg',
+                      help="Saved name. Leave blank to use the URL's filename or a timestamp. The extension is set from the image data.") }}
+      </div>
+    </div>
+  </section>
+
+  <section id="it-url" data-collapsible class="card">
+    {{ card_head('From a URL', icon_name='link', level=2,
+                 blurb='Fetched server-side; jpg, png, webp, gif and bmp up to %d MB.'|format(max_upload_mb),
+                 collapse='it-url') }}
+    <div id="it-url-body" data-collapsible-body>
+      <div class="field-grid">
+        {{ text_input('it-url-input', 'url', 'Image URL', type='text',
+                      placeholder='https://example.com/photo.jpg',
+                      help="A bare host/path is treated as https. Hosts can be restricted under Settings → Plugins → Inky tools.") }}
+      </div>
+      <div class="actions">{{ button('Save from URL', name='source', value='url', icon='download-simple') }}</div>
+    </div>
+  </section>
+
+  <section id="it-paste" data-collapsible class="card">
+    {{ card_head('From the clipboard', icon_name='clipboard', level=2,
+                 blurb='Click the box, press Ctrl+V (or drop an image on it), then save.',
+                 collapse='it-paste') }}
+    <div id="it-paste-body" data-collapsible-body>
+      <div id="paste-zone" class="paste-zone" tabindex="0" role="button"
+           aria-label="Paste or drop an image here">
+        <img id="paste-preview" alt="Pasted image preview" hidden>
+        <p id="paste-hint">Click here and press <strong>Ctrl+V</strong>, or drop an image file.</p>
+      </div>
+      <input type="hidden" name="paste_data" id="paste-data">
+      <div class="actions">{{ button('Save pasted image', name='source', value='paste', icon='upload-simple') }}</div>
+    </div>
+  </section>
+
+  {% if not gallery_ready %}
+  <p class="field-help">The bundled <code>picture_gallery</code> plugin isn't installed or is disabled, so there's nowhere to save images.</p>
+  {% elif gallery_url %}
+  <p class="field-help"><a href="{{ gallery_url }}">Open Widgets → Gallery</a> to see the imported images.</p>
+  {% endif %}
+</form>
+
+<style>
+  .paste-zone {
+    min-height: 170px; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 12px; padding: 18px;
+    border: 2px dashed var(--t-border-strong); border-radius: 8px;
+    background: var(--t-surface); color: var(--t-fg-soft); cursor: pointer; text-align: center;
+  }
+  .paste-zone:hover, .paste-zone:focus-visible { border-color: var(--t-accent); outline: none; }
+  .paste-zone img { max-width: 100%; max-height: 260px; object-fit: contain; border-radius: 4px; }
+  .paste-zone p { margin: 0; }
+</style>
+<script>
+(function () {
+  "use strict";
+  const zone = document.getElementById("paste-zone");
+  const data = document.getElementById("paste-data");
+  const preview = document.getElementById("paste-preview");
+  const hint = document.getElementById("paste-hint");
+  const maxBytes = {{ (max_upload_mb * 1024 * 1024)|int }};
+  function accept(file) {
+    if (!file || !file.type || file.type.indexOf("image/") !== 0) return;
+    if (file.size > maxBytes) {
+      hint.textContent = "That image is larger than " + Math.round(maxBytes / 1048576) + " MB.";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = function () {
+      data.value = String(reader.result);
+      preview.src = String(reader.result);
+      preview.hidden = false;
+      hint.textContent = file.name || "Image ready to save";
+    };
+    reader.readAsDataURL(file);
+  }
+  document.addEventListener("paste", function (event) {
+    if (event.target && event.target.matches("input, textarea")) return;
+    const items = event.clipboardData && event.clipboardData.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.kind === "file") { accept(item.getAsFile()); break; }
+    }
+    event.preventDefault();
+  });
+  zone.addEventListener("click", function () { zone.focus(); });
+  zone.addEventListener("dragover", function (e) { e.preventDefault(); });
+  zone.addEventListener("drop", function (e) {
+    e.preventDefault();
+    for (const file of e.dataTransfer.files) accept(file);
+  });
+})();
+</script>
+
+{% else %}
+
+<section class="card">
+  {{ card_head('OTA window', icon_name='upload-simple', level=2,
+               blurb='Publishes a one-shot retained command to %s. After enabling, press the panel button: the firmware wakes, clears the command and opens an ArduinoOTA window for a few minutes.'|format(topic)) }}
+  <div class="card-body">
+    <div class="actions">
+      <form method="post" action="{{ url_for('inky_tools.ota_enable') }}">{{ button('Enable OTA window', icon='upload-simple') }}</form>
+      <form method="post" action="{{ url_for('inky_tools.ota_clear') }}">{{ button('Clear command', variant='ghost', icon='x') }}</form>
+    </div>
+    <p class="field-help">Then upload from the LAN with <code>pio run -e tesserae-ota -t upload</code>. The command token must match <code>OTA_CMD_TOKEN</code> in <code>tesserae_config.h</code>; the real security boundary is ArduinoOTA's password.</p>
+    <p class="field-help">Configure the device id and token under <em>Settings → Plugins → Inky tools</em>.</p>
+  </div>
+</section>
+
+{% endif %}
+{% endblock %}
