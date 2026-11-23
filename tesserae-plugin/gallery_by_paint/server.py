@@ -1,9 +1,10 @@
-"""Admin plugin: pin one gallery photo per *confirmed panel paint*.
+"""Admin plugin: one gallery photo per *confirmed panel paint*, pushed directly.
 
-The bundled picture_gallery advances its own cursor on every render, even
-when the panel is asleep and never shows the frame. This plugin bypasses that
-cursor: it owns the cell's ``file`` pin, and moves it only when the panel's
-heartbeat confirms it actually painted a frame pushed from the gallery page.
+The Chromium page-render path is unreliable for a full-screen photo: its
+5-second image wait intermittently captures a blank frame. This plugin avoids
+Chromium entirely — it pushes the gallery image bytes straight through the
+panel renderer with ``PushManager.push_image()``, the same path the Send tab
+uses for a file or URL.
 
 Firmware contract (inky13-tesserae-0.2+): the status heartbeat carries
 
@@ -11,11 +12,14 @@ Firmware contract (inky13-tesserae-0.2+): the status heartbeat carries
 
 ``paint_seq`` increments on each successful refresh. ``painted_digest`` is the
 <digest> from the frame URL the panel downloaded. The plugin queries the event
-log to check that the painted digest belongs to a push of the gallery page —
-an unrelated Send-tab push has a different target and is ignored.
+log to check that the painted digest was a push from this plugin — an unrelated
+Send-tab push lands under a different source and is ignored.
 
-Admin routes are behind Tesserae's normal login/provenance gate; the MQTT
-subscription and the page edit happen inside the server process.
+On each confirmed paint the plugin advances its index and pushes the next
+image, so the panel has a fresh frame waiting at its next wake. The gallery
+deck should be disabled so scheduled page renders cannot overwrite it.
+
+Admin routes are behind Tesserae's normal login/provenance gate.
 """
 
 from __future__ import annotations
@@ -24,6 +28,8 @@ import json
 import logging
 import re
 import sqlite3
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -116,11 +122,14 @@ def _images() -> list[str]:
         return []
 
 
-def _gallery_push_exists(digest: str) -> bool:
-    """True when a push of the gallery page published exactly this frame.
+PUSH_SOURCE = "gallery_by_paint"
 
-    Send-tab pushes target no page (or a different one), so their digests
-    never match here even though the panel paints them and bumps paint_seq.
+
+def _plugin_push_exists(digest: str) -> bool:
+    """True when one of *our* direct image pushes published this frame.
+
+    Anything else that paints the panel (Send tab, a dashboard push) lands
+    under a different source, so it can't be mistaken for a consumed photo.
     """
     if not DIGEST_RE.fullmatch(digest):
         return False
@@ -135,9 +144,9 @@ def _gallery_push_exists(digest: str) -> bool:
         try:
             rows = conn.execute(
                 """SELECT extra_json FROM events
-                   WHERE type='push' AND status='sent' AND target=?
+                   WHERE type='push' AND status='sent' AND source=?
                    ORDER BY id DESC LIMIT 200""",
-                (_page_id(),),
+                (PUSH_SOURCE,),
             ).fetchall()
             for (raw,) in rows:
                 try:
@@ -189,6 +198,53 @@ def _pin_current(app: Any) -> None:
         logger.info("gallery_by_paint: pinned %s (index %d/%d)", name, index, len(images))
 
 
+def _push_photo(app: Any, name: str) -> None:
+    """Push one gallery image straight to the panel — no Chromium involved."""
+    with app.app_context():
+        gallery = _gallery_module()
+        if gallery is None:
+            raise ValueError("picture_gallery plugin is not installed")
+        path = gallery.resolve_image_path(_folder(), name)
+        if path is None:
+            raise ValueError(f"gallery image '{name}' is missing")
+        manager = current_app.config.get("PUSH_MANAGER")
+        if manager is None:
+            raise ValueError("PUSH_MANAGER is unavailable")
+        result = manager.push_image(
+            path.read_bytes(),
+            source_label=name,
+            device_id=_device_id(),
+            fit="fill",
+            source=PUSH_SOURCE,
+        )
+        if getattr(result, "status", None) == "failed":
+            raise ValueError(f"push failed: {getattr(result, 'error', '?')}")
+        logger.info("gallery_by_paint: pushed %s -> %s", name, _device_id())
+
+
+def _advance(app: Any, state: dict[str, Any]) -> None:
+    images = _images()
+    if not images:
+        logger.warning("gallery_by_paint: no images in folder '%s'", _folder())
+        return
+    index = (int(state.get("index") or 0) + 1) % len(images)
+    name = images[index]
+    state["index"] = index
+    state["pinned"] = name
+    _save_state(state)
+    try:
+        _push_photo(app, name)
+    except Exception as exc:  # noqa: BLE001 - keep the index, report in admin page
+        state["last_error"] = str(exc)
+        _save_state(state)
+        logger.exception("gallery_by_paint: could not push %s", name)
+    else:
+        state.pop("last_error", None)
+        _save_state(state)
+    # Keep the cell's pin in sync for anyone who opens the gallery page.
+    _pin_current(app)
+
+
 def _on_status(app: Any, _topic: str, payload: bytes) -> None:
     try:
         body = json.loads(payload)
@@ -204,12 +260,13 @@ def _on_status(app: Any, _topic: str, payload: bytes) -> None:
         state = _state()
         last = state.get("last_seq")
         if last is None:
-            # First heartbeat after install/restart: seed, don't consume.
+            # First heartbeat after install/restart: seed and put image 0 in
+            # the retained topic so the next wake has something to paint.
             state["last_seq"] = seq
             state["last_digest"] = body.get("painted_digest")
-            state.setdefault("index", 0)
+            state.setdefault("index", -1)
             _save_state(state)
-            _pin_current(app)
+            _advance(app, state)
             return
         if seq == last:
             return  # duplicate / button wake with no new paint
@@ -223,38 +280,63 @@ def _on_status(app: Any, _topic: str, payload: bytes) -> None:
         state["last_seq"] = seq
         digest = body.get("painted_digest")
         state["last_digest"] = digest
-        confirmed = (
-            isinstance(digest, str)
-            and _gallery_push_exists(digest)
-        )
+        confirmed = isinstance(digest, str) and _plugin_push_exists(digest)
         state["last_confirmed"] = confirmed
         _save_state(state)
 
         if confirmed:
-            state["index"] = int(state.get("index") or 0) + 1
-            _save_state(state)
-            _pin_current(app)
+            _advance(app, state)
             logger.info("gallery_by_paint: consumed frame %s", digest)
+
+
+def _subscribe_now(app: Any) -> None:
+    device = _device_id()
+    key = (id(app), device)
+    if key in _subscribed:
+        return
+    transport = app.config.get("MQTT_TRANSPORT")
+    if transport is None:
+        return
+    topic = f"tesserae/{device}/status"
+    transport.subscribe(topic, lambda t, p: _on_status(app, t, p))
+    _subscribed.add(key)
+    logger.info("gallery_by_paint: subscribed to %s", topic)
 
 
 @bp.before_app_request
 def _ensure_subscription() -> None:
-    """Register the MQTT status listener once, using the live transport."""
+    """Fallback for request-driven startup."""
     try:
-        app = current_app._get_current_object()
-        device = _device_id()
-        key = (id(app), device)
-        if key in _subscribed:
-            return
-        transport = current_app.config.get("MQTT_TRANSPORT")
-        if transport is None:
-            return
-        topic = f"tesserae/{device}/status"
-        transport.subscribe(topic, lambda t, p: _on_status(app, t, p))
-        _subscribed.add(key)
-        logger.info("gallery_by_paint: subscribed to %s", topic)
+        _subscribe_now(current_app._get_current_object())
     except Exception:  # noqa: BLE001 - never break a request over telemetry
         logger.exception("gallery_by_paint: could not subscribe to status")
+
+
+def _start_subscription_watcher(app: Any) -> None:
+    """Register at startup without depending on an HTTP request.
+
+    With the gallery deck disabled there may be no loopback renders at all,
+    so a purely lazy subscription would never appear after a restart.
+    """
+
+    def watch() -> None:
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            try:
+                with app.app_context():
+                    if app.config.get("MQTT_TRANSPORT") is not None:
+                        _subscribe_now(app)
+                        return
+            except Exception:  # noqa: BLE001 - retry while the app boots
+                logger.debug("gallery_by_paint: subscription watcher retry", exc_info=True)
+            time.sleep(1)
+
+    threading.Thread(target=watch, name="gallery-by-paint-subscribe", daemon=True).start()
+
+
+@bp.record_once
+def _on_blueprint_registered(state: Any) -> None:
+    _start_subscription_watcher(state.app)
 
 
 # ----- admin pages -----------------------------------------------------
@@ -286,28 +368,37 @@ def index() -> str:
 
 @bp.post("/skip")
 def skip():
-    state = _state()
-    state["index"] = int(state.get("index") or 0) + 1
-    _save_state(state)
-    _pin_current(current_app._get_current_object())
-    flash("Skipped to the next gallery photo.", "ok")
+    app = current_app._get_current_object()
+    _advance(app, _state())
+    flash("Pushed the next gallery photo.", "ok")
     return redirect(url_for("gallery_by_paint.index"))
 
 
 @bp.post("/reset")
 def reset():
+    app = current_app._get_current_object()
     state = _state()
-    state["index"] = 0
+    state["index"] = -1
     _save_state(state)
-    _pin_current(current_app._get_current_object())
-    flash("Reset to the first gallery photo.", "ok")
+    _advance(app, state)
+    flash("Reset to the first gallery photo and pushed it.", "ok")
     return redirect(url_for("gallery_by_paint.index"))
 
 
 @bp.post("/repin")
 def repin():
-    _pin_current(current_app._get_current_object())
-    flash("Re-applied the current photo to the gallery cell.", "ok")
+    app = current_app._get_current_object()
+    state = _state()
+    images = _images()
+    if images:
+        name = images[int(state.get("index") or 0) % len(images)]
+        try:
+            _push_photo(app, name)
+            flash(f"Pushed {name} again.", "ok")
+        except ValueError as exc:
+            flash(str(exc), "warn")
+    else:
+        flash("No gallery images available.", "warn")
     return redirect(url_for("gallery_by_paint.index"))
 
 

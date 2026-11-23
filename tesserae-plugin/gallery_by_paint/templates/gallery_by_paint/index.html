@@ -5,7 +5,7 @@
 {% block main %}
 <div class="page-head">
   <h1><i class="ph-bold ph-images" aria-hidden="true"></i> Gallery by paint</h1>
-  <p class="page-blurb">The gallery advances only after the panel confirms it painted the frame — one photo per actual display, not per render.</p>
+  <p class="page-blurb">One gallery photo per confirmed panel paint, pushed straight to the panel — no Chromium page render, no blank frames.</p>
 </div>
 
 <section class="card">
@@ -32,9 +32,9 @@
   {{ card_head('Controls', icon_name='sliders-horizontal', level=2) }}
   <div class="card-body">
     <div class="actions">
-      <form method="post" action="{{ url_for('gallery_by_paint.skip') }}">{{ button('Skip to next', icon='skip-forward') }}</form>
-      <form method="post" action="{{ url_for('gallery_by_paint.repin') }}">{{ button('Re-apply pin', variant='ghost', icon='arrow-counterclockwise') }}</form>
-      <form method="post" action="{{ url_for('gallery_by_paint.reset') }}" onsubmit="return confirm('Reset to the first photo?');">{{ button('Reset', variant='ghost danger', icon='arrow-clockwise') }}</form>
+      <form method="post" action="{{ url_for('gallery_by_paint.skip') }}">{{ button('Push next photo', icon='skip-forward') }}</form>
+      <form method="post" action="{{ url_for('gallery_by_paint.repin') }}">{{ button('Push current again', variant='ghost', icon='arrow-counterclockwise') }}</form>
+      <form method="post" action="{{ url_for('gallery_by_paint.reset') }}" onsubmit="return confirm('Reset to the first photo?');">{{ button('Reset to first', variant='ghost danger', icon='arrow-clockwise') }}</form>
     </div>
   </div>
 </section>
@@ -43,12 +43,11 @@
   {{ card_head('How it works', icon_name='question', level=2, collapse='gbp-how') }}
   <div id="gbp-how-body" data-collapsible-body>
     <ol>
-      <li>The plugin pins one photo in the gallery cell using the widget's <code>file</code> option (its own sequential cursor is bypassed).</li>
-      <li>Tesserae renders and pushes the page; the panel paints it on wake.</li>
-      <li>The next heartbeat reports <code>paint_seq</code> and <code>painted_digest</code>.</li>
-      <li>The plugin checks the event log: if that digest came from a push of this gallery page, the photo was consumed and the pin moves to the next one.</li>
+      <li>The plugin pushes the next gallery image directly with <code>push_image()</code> — the same path as Send → File — so no Chromium render is involved.</li>
+      <li>The panel paints it on wake and reports <code>paint_seq</code> and <code>painted_digest</code> in its next heartbeat.</li>
+      <li>The plugin checks the event log: if that digest came from its own direct push, the photo was really displayed and the next one is pushed immediately.</li>
     </ol>
-    <p class="field-help">Button wakes that find no new frame don't increment <code>paint_seq</code>, so they cost no lineup steps. Pushes from the Send tab or another dashboard don't match the gallery page and are ignored. Requires firmware <code>inky13-tesserae-0.2</code> or later.</p>
+    <p class="field-help">Button wakes with no new frame don't increment <code>paint_seq</code>, so they cost no lineup steps. The gallery deck must be disabled so scheduled page renders cannot overwrite these frames. Requires firmware <code>inky13-tesserae-0.2</code> or later.</p>
   </div>
 </section>
 {% endblock %}
