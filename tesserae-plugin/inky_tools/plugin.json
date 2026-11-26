@@ -48,7 +48,7 @@
       "label": "OTA command token",
       "default": "inky13-ota-enable",
       "secret": true,
-      "help": "Must match OTA_CMD_TOKEN in the firmware (tesserae_config.h)."
+      "help": "Must match TESS_OTA_CMD_TOKEN in the firmware's src/secrets.h."
     }
   ]
 }

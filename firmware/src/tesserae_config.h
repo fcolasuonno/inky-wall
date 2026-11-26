@@ -14,15 +14,21 @@
 #define TOPIC_CONFIG            "tesserae/" TESSERAE_DEVICE_ID "/config"
 #define TOPIC_STATUS            "tesserae/" TESSERAE_DEVICE_ID "/status"
 
+// One-shot server directive: how long to sleep after this wake. Lets the
+// server pick the next wake from a wall-clock schedule (the board has no
+// RTC clock). Published retained by the wake_schedule plugin on each
+// heartbeat and cleared by the firmware after it is consumed.
+#define TOPIC_CMD_SLEEP         "tesserae/" TESSERAE_DEVICE_ID "/cmd/sleep"
+#define CMD_SLEEP_WAIT_MS       30000UL
+
 // One-shot OTA trigger, published retained by the Tesserae admin plugin.
 // The command is consumed (cleared) on the first wake that sees it.
 #define TOPIC_CMD_OTA           "tesserae/" TESSERAE_DEVICE_ID "/cmd/ota"
-#define OTA_CMD_TOKEN           "inky13-ota-enable"
-#define OTA_HOSTNAME            "inky13-ota"
+// OTA hostname and one-shot command token live in secrets.h (see its example).
 #define OTA_WINDOW_MS           (180000UL)   // 3 minutes; ArduinoOTA reboots on success
 #define OTA_HOLD_MS             (5000UL)     // hold Button A this long at wake to open OTA
 
-#define FW_VERSION              "inky13-tesserae-0.2"
+#define FW_VERSION              "inky13-tesserae-0.3"
 
 // ---- panel scan geometry -----------------------------------------------------
 // Tesserae packs at the panel's firmware-native row stride. The Inky glass is

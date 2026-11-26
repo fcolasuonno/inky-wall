@@ -122,7 +122,7 @@ mosquitto_pub -t tesserae/inky13/cmd/ota -m inky13-ota-enable -r
 ```
 
 `<password>` is `OTA_PASSWORD` in `src/secrets.h` (see `secrets.h.example`).
-The plugin's command token must match `OTA_CMD_TOKEN` in `tesserae_config.h`.
+The plugin's command token must match `TESS_OTA_CMD_TOKEN` in `src/secrets.h`.
 A successful upload reboots into the new image; if nothing is uploaded, the
 board sleeps again when the window closes. This is plain LAN flashing — no
 Tesserae signing, canary or reporting.
@@ -147,5 +147,26 @@ Tesserae signing, canary or reporting.
   [pimoroni/inky](https://github.com/pimoroni/inky) (MIT).
 - Server side rendering/scheduling is handled by a self-hosted Tesserae
   instance; this repo contains no server code.
+
+## Server-side gallery cache permissions
+
+If Tesserae's `picture_gallery` data dir is a host bind mount (here:
+`${MERGERFS_ROOT}/Media/HomeAssistant/Pictures` →
+`/app/data/plugins/picture_gallery`), the container user (`pwuser`, uid 1001 in
+this image) must be able to **write** into it. Otherwise the plugin cannot
+create `.sized/` downscaled copies: large originals are served whole, the
+headless renderer's 5-second image wait times out, and the panel paints a blank
+frame. On a bind mount where `chown` does not stick, grant the container user
+write access with an ACL instead of making the tree world-writable:
+
+```bash
+sudo setfacl -R -m u:1001:rwx /mnt/storage/Media/HomeAssistant/Pictures
+sudo setfacl -R -d -m u:1001:rwx /mnt/storage/Media/HomeAssistant/Pictures
+```
+
+The second command sets the default ACL so directories created later (including
+`.sized/`) stay writable. If ACLs are unavailable on that filesystem, the
+fallback is `chmod -R o+w` on the picture tree, but that exposes it to every
+local user and is best avoided.
 
 MIT — see [LICENSE](LICENSE).

@@ -1,4 +1,4 @@
-"""Admin plugin: one gallery photo per *confirmed panel paint*, pushed directly.
+"""Admin plugin: one gallery photo per wake, pushed directly.
 
 The Chromium page-render path is unreliable for a full-screen photo: its
 5-second image wait intermittently captures a blank frame. This plugin avoids
@@ -6,18 +6,18 @@ Chromium entirely — it pushes the gallery image bytes straight through the
 panel renderer with ``PushManager.push_image()``, the same path the Send tab
 uses for a file or URL.
 
-Firmware contract (inky13-tesserae-0.2+): the status heartbeat carries
+Firmware contract (inky13-tesserae-0.3+ / paperless-L-tesserae): the status
+heartbeat carries
 
-    "paint_seq": <n>, "painted_digest": "<digest>"
+    "paint_seq": <n>, "painted_digest": "<digest>", "wake_reason": "<reason>"
 
-``paint_seq`` increments on each successful refresh. ``painted_digest`` is the
-<digest> from the frame URL the panel downloaded. The plugin queries the event
-log to check that the painted digest was a push from this plugin — an unrelated
-Send-tab push lands under a different source and is ignored.
-
-On each confirmed paint the plugin advances its index and pushes the next
-image, so the panel has a fresh frame waiting at its next wake. The gallery
-deck should be disabled so scheduled page renders cannot overwrite it.
+``paint_seq`` increments on each successful refresh and ``painted_digest`` is
+the <digest> from the frame URL the panel downloaded. Every wake — timer or
+button — advances the index and pushes the next image, so a fresh frame is
+waiting at the next wake. The event log is queried only to display whether the
+last painted digest came from this plugin; an unrelated Send-tab push lands
+under a different source and never gates the advance. The gallery deck should
+be disabled so scheduled page renders cannot overwrite it.
 
 Admin routes are behind Tesserae's normal login/provenance gate.
 """
@@ -45,6 +45,8 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint("gallery_by_paint", __name__, template_folder="templates")
 _subscribed: set[tuple[int, str]] = set()
+_last_wake: dict[tuple[int, str], float] = {}
+_WAKE_DEDUPE_S = 60.0
 
 
 # ----- helpers ---------------------------------------------------------
@@ -257,36 +259,36 @@ def _on_status(app: Any, _topic: str, payload: bytes) -> None:
         return
 
     with app.app_context():
-        state = _state()
-        last = state.get("last_seq")
-        if last is None:
-            # First heartbeat after install/restart: seed and put image 0 in
-            # the retained topic so the next wake has something to paint.
-            state["last_seq"] = seq
-            state["last_digest"] = body.get("painted_digest")
-            state.setdefault("index", -1)
-            _save_state(state)
-            _advance(app, state)
+        device = _device_id()
+        # Retained replay / duplicate deliveries must not consume a photo.
+        # Real wakes are minutes apart, so a short cooldown is enough.
+        key = (id(app), device)
+        now = time.monotonic()
+        if now - _last_wake.get(key, 0.0) < _WAKE_DEDUPE_S:
             return
-        if seq == last:
-            return  # duplicate / button wake with no new paint
-        if seq < last:
-            # Firmware reflashed / NVS cleared: re-seed, don't count it.
-            state["last_seq"] = seq
-            state["last_digest"] = body.get("painted_digest")
-            _save_state(state)
-            return
+        _last_wake[key] = now
 
-        state["last_seq"] = seq
+        state = _state()
+        state.setdefault("index", -1)
         digest = body.get("painted_digest")
+        state["last_seq"] = seq
         state["last_digest"] = digest
-        confirmed = isinstance(digest, str) and _plugin_push_exists(digest)
-        state["last_confirmed"] = confirmed
+        state["last_wake_reason"] = str(body.get("wake_reason") or "unknown")
+        state["last_confirmed"] = isinstance(digest, str) and _plugin_push_exists(digest)
+        if seq < int(state.get("seen_seq") or 0):
+            # Firmware reflashed / NVS cleared: don't let the reset consume a
+            # photo, but still push a fresh one for this wake.
+            logger.info("gallery_by_paint: paint_seq reset (%s -> %s)", state.get("seen_seq"), seq)
+        state["seen_seq"] = seq
         _save_state(state)
 
-        if confirmed:
-            _advance(app, state)
-            logger.info("gallery_by_paint: consumed frame %s", digest)
+        # Every wake gets a fresh image — including button wakes, which the
+        # operator explicitly uses to pull whatever is new.
+        _advance(app, state)
+        logger.info(
+            "gallery_by_paint: wake=%s pushed next photo (confirmed=%s)",
+            state["last_wake_reason"], state["last_confirmed"],
+        )
 
 
 def _subscribe_now(app: Any) -> None:
@@ -300,6 +302,9 @@ def _subscribe_now(app: Any) -> None:
     topic = f"tesserae/{device}/status"
     transport.subscribe(topic, lambda t, p: _on_status(app, t, p))
     _subscribed.add(key)
+    # The broker replays the last retained status immediately; don't treat it
+    # as a wake and push a photo nobody is looking at.
+    _last_wake[key] = time.monotonic()
     logger.info("gallery_by_paint: subscribed to %s", topic)
 
 

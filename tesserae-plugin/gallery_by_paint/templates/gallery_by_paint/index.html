@@ -5,7 +5,7 @@
 {% block main %}
 <div class="page-head">
   <h1><i class="ph-bold ph-images" aria-hidden="true"></i> Gallery by paint</h1>
-  <p class="page-blurb">One gallery photo per confirmed panel paint, pushed straight to the panel — no Chromium page render, no blank frames.</p>
+  <p class="page-blurb">One gallery photo per wake, pushed straight to the panel — no Chromium page render, no blank frames.</p>
 </div>
 
 <section class="card">
@@ -16,10 +16,11 @@
       <tbody>
         <tr><th>Currently pinned</th><td><code>{{ current or '(none)' }}</code></td></tr>
         <tr><th>Position</th><td>{{ (index % images|length) + 1 if images else 0 }} / {{ images|length }}</td></tr>
-        <tr><th>Next after a confirmed paint</th><td><code>{{ next_image or '(none)' }}</code></td></tr>
+        <tr><th>Next image to push</th><td><code>{{ next_image or '(none)' }}</code></td></tr>
         <tr><th>Last paint sequence</th><td>{{ state.get('last_seq', '—') }}</td></tr>
         <tr><th>Last painted digest</th><td><code>{{ state.get('last_digest') or '—' }}</code></td></tr>
-        <tr><th>Was it a gallery push?</th><td>{{ 'yes' if state.get('last_confirmed') else 'no / unknown' }}</td></tr>
+        <tr><th>Last wake reason</th><td>{{ state.get('last_wake_reason') or '—' }}</td></tr>
+        <tr><th>Was last paint ours?</th><td>{{ 'yes' if state.get('last_confirmed') else 'no / unknown' }}</td></tr>
       </tbody>
     </table>
     {% if not images %}
@@ -47,7 +48,7 @@
       <li>The panel paints it on wake and reports <code>paint_seq</code> and <code>painted_digest</code> in its next heartbeat.</li>
       <li>The plugin checks the event log: if that digest came from its own direct push, the photo was really displayed and the next one is pushed immediately.</li>
     </ol>
-    <p class="field-help">Button wakes with no new frame don't increment <code>paint_seq</code>, so they cost no lineup steps. The gallery deck must be disabled so scheduled page renders cannot overwrite these frames. Requires firmware <code>inky13-tesserae-0.2</code> or later.</p>
+    <p class="field-help">Every wake — timer or button — pushes the next image. The gallery deck must be disabled so scheduled page renders cannot overwrite these frames. Requires firmware <code>inky13-tesserae-0.3</code> or <code>paperless-L-tesserae</code>.</p>
   </div>
 </section>
 {% endblock %}

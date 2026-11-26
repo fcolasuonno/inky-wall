@@ -137,7 +137,7 @@
       <form method="post" action="{{ url_for('inky_tools.ota_enable') }}">{{ button('Enable OTA window', icon='upload-simple') }}</form>
       <form method="post" action="{{ url_for('inky_tools.ota_clear') }}">{{ button('Clear command', variant='ghost', icon='x') }}</form>
     </div>
-    <p class="field-help">Then upload from the LAN with <code>pio run -e tesserae-ota -t upload</code>. The command token must match <code>OTA_CMD_TOKEN</code> in <code>tesserae_config.h</code>; the real security boundary is ArduinoOTA's password.</p>
+    <p class="field-help">Then upload from the LAN with <code>pio run -e tesserae-ota -t upload</code>. The command token must match <code>TESS_OTA_CMD_TOKEN</code> in <code>src/secrets.h</code>; the real security boundary is ArduinoOTA's password.</p>
     <p class="field-help">Configure the device id and token under <em>Settings → Plugins → Inky tools</em>.</p>
   </div>
 </section>

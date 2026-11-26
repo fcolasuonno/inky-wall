@@ -3,7 +3,7 @@
   "name": "Gallery by paint",
   "version": "0.1.0",
   "kind": "admin",
-  "description": "Pins one picture_gallery photo per confirmed panel paint. The panel reports paint_seq + painted_digest in its heartbeat; the plugin advances only when the painted frame was a push of the gallery page.",
+  "description": "Pushes one picture_gallery photo per panel wake (timer or button). The panel reports paint_seq, painted_digest and wake_reason in its heartbeat; the plugin advances on every wake.",
   "icon": "ph-images",
   "supports": {
     "sizes": []

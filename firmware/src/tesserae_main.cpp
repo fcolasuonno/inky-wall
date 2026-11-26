@@ -49,8 +49,13 @@ static int battPct = -1;
 static volatile bool gotFrame = false;
 static volatile bool gotConfig = false;
 static volatile bool otaRequested = false;
+static volatile bool gotCmdSleep = false;
 static char frameUrl[200] = "";
 static uint32_t cfgSleep = 0;
+static uint32_t cmdSleep = 0;
+// Directive applies to this wake only. NVS keeps the operator-configured
+// cadence, so removing the schedule plugin falls back to sleep_interval_s.
+static uint32_t directiveSleep = 0;
 
 // ---- small JSON helpers (payloads are not NUL-terminated) --------------------
 static bool jsonString(const char* data, size_t len, const char* key,
@@ -167,14 +172,28 @@ static void mqttCallback(char* topic, byte* payload, unsigned int len) {
             gotConfig = true;
             Serial.printf("[mqtt] config sleep_interval_s=%ld\n", (long)v);
         }
+    } else if (strcmp(topic, TOPIC_CMD_SLEEP) == 0) {
+        // One-shot directive from the server: {"sleep_s": N}. An empty
+        // payload is the clear message, so our own ack cannot re-arm it.
+        if (len == 0) {
+            gotCmdSleep = false;
+            cmdSleep = 0;
+        } else {
+            int32_t v = 0;
+            if (jsonInt((const char*)payload, len, "sleep_s", &v) && v > 0) {
+                cmdSleep = (uint32_t)v;
+                gotCmdSleep = true;
+                Serial.printf("[main] sleep directive: %lus\n", (unsigned long)cmdSleep);
+            }
+        }
     } else if (strcmp(topic, TOPIC_CMD_OTA) == 0) {
         // Retained one-shot command from the Tesserae admin plugin. An empty
         // payload is the clear message (including our own), so it never
         // re-arms the window.
         if (len == 0) {
             otaRequested = false;
-        } else if (len == strlen(OTA_CMD_TOKEN) &&
-                   memcmp(payload, OTA_CMD_TOKEN, len) == 0) {
+        } else if (len == strlen(TESS_OTA_CMD_TOKEN) &&
+                   memcmp(payload, TESS_OTA_CMD_TOKEN, len) == 0) {
             otaRequested = true;
             Serial.println("[ota] command received");
         }
@@ -202,6 +221,7 @@ static bool connectMQTT() {
     mqtt.subscribe(TOPIC_FRAME, 1);
     mqtt.subscribe(TOPIC_CONFIG, 1);
     mqtt.subscribe(TOPIC_CMD_OTA, 1);
+    mqtt.subscribe(TOPIC_CMD_SLEEP, 1);
     return true;
 }
 
@@ -227,6 +247,28 @@ static void waitRetained() {
         mqtt.loop();
         delay(2);
     }
+    // A retained sleep directive from a wake we missed is stale: only accept
+    // one published in response to the heartbeat we are about to send.
+    gotCmdSleep = false;
+    cmdSleep = 0;
+}
+
+// The server computes the next wake from a wall-clock schedule and publishes
+// one retained directive after each heartbeat. This board has no RTC/clock,
+// so it cannot do that itself.
+static void waitForSleepDirective() {
+    uint32_t t0 = millis();
+    while (!gotCmdSleep && mqtt.connected() && millis() - t0 < CMD_SLEEP_WAIT_MS) {
+        mqtt.loop();
+        delay(2);
+    }
+    if (gotCmdSleep && cmdSleep >= MIN_SLEEP_S && cmdSleep <= MAX_SLEEP_S) {
+        directiveSleep = cmdSleep;   // this wake only; NVS keeps the fallback
+        Serial.printf("[main] scheduled sleep -> %lus\n", (unsigned long)directiveSleep);
+        mqtt.publish(TOPIC_CMD_SLEEP, "", true);   // consume the one-shot
+    }
+    gotCmdSleep = false;
+    cmdSleep = 0;
 }
 
 // ---- button / reset press ----------------------------------------------------
@@ -329,7 +371,7 @@ static const char* wakeReason() {
 }
 
 static uint32_t computeNextSleep() {
-    uint32_t s = sleepS;
+    uint32_t s = directiveSleep ? directiveSleep : sleepS;
     if (s < MIN_SLEEP_S || s > MAX_SLEEP_S) s = DEFAULT_SLEEP_S;
     if (paintFails > 0 && paintFails <= RETRY_MAX_LEVELS) {
         uint32_t retry = RETRY_BASE_S << (paintFails - 1);   // 15m, 30m, 60m
@@ -614,6 +656,9 @@ void setup() {
         goToSleep();
         return;
     }
+
+    // Server-computed sleep for the next scheduled (or button-tap) wake.
+    waitForSleepDirective();
 
     // Button A / reset: no advance. Wait briefly only if the retained URL is
     // still the one we already painted - a push may still be rendering on the

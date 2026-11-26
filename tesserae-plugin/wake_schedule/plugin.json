@@ -1,0 +1,23 @@
+{
+  "tesserae_compat": "1.x",
+  "name": "Wake schedule",
+  "version": "0.1.0",
+  "kind": "admin",
+  "description": "Per-device wall-clock wake times. Publishes a one-shot retained sleep directive after each heartbeat so clockless ESP32 panels wake at the configured times, including after a button wake.",
+  "icon": "ph-clock",
+  "supports": {
+    "sizes": []
+  },
+  "requires": [
+    "settings:plugin"
+  ],
+  "settings": [
+    {
+      "name": "dedupe_s",
+      "type": "string",
+      "label": "Duplicate-window (s)",
+      "default": "60",
+      "help": "Ignore repeated status messages for the same device inside this window (retained replay / duplicate deliveries)."
+    }
+  ]
+}

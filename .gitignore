@@ -5,6 +5,11 @@
 
 # Credentials: copy secrets.h.example to secrets.h (never commit the real one)
 firmware/src/secrets.h
+firmware-esp32/src/secrets.h
+firmware-paperless-L-tesserae/src/secrets.h
+# set_env.py injects credentials from .env as compile definitions
+.env
+.env.*
 
 # IDE
 .idea/

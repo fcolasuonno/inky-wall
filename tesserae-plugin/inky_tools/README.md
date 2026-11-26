@@ -45,7 +45,7 @@ fallbacks, so existing values survive the move. New values go to the single
 | `default_folder` | first folder | Folder pre-selected on the import tab. |
 | `max_size_mb` | `20` | Cap on fetched / pasted bytes (1–100). |
 | `allowed_hosts` | empty | Comma-separated hostnames allowed for URL imports. |
-| `token` | `inky13-ota-enable` | Must match `OTA_CMD_TOKEN` in the firmware. |
+| `token` | `inky13-ota-enable` | Must match `TESS_OTA_CMD_TOKEN` in the firmware's `src/secrets.h`. |
 
 ## Import tab
 

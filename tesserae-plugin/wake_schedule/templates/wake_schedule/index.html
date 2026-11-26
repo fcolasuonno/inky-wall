@@ -1,0 +1,73 @@
+{% extends "_base.html" %}
+{% from "_components.html" import card_head, text_input, button %}
+{% block title %}Wake schedule, Tesserae{% endblock %}
+
+{% block main %}
+<div class="page-head">
+  <h1><i class="ph-bold ph-clock" aria-hidden="true"></i> Wake schedule</h1>
+  <p class="page-blurb">Wall-clock wake times per device. The board has no clock, so after each heartbeat the plugin tells it how long to sleep until the next configured time.</p>
+</div>
+
+<section class="card">
+  {{ card_head('Devices', icon_name='devices', level=2) }}
+  <div class="card-body">
+    {% if devices %}
+    <table class="table">
+      <thead><tr><th>Device</th><th>Wake times</th><th>Next wake</th><th>Last wake</th><th></th></tr></thead>
+      <tbody>
+        {% for d in devices %}
+        <tr>
+          <td><strong>{{ d.id }}</strong>{% if not d.enabled %} <span class="tag">disabled</span>{% endif %}</td>
+          <td><code>{{ d.times }}</code></td>
+          <td>{% if d.next_wake %}{{ (d.next_wake / 3600)|round(2) }}h{% else %}—{% endif %}</td>
+          <td>{{ d.last_seen or '—' }}{% if d.last_wake_reason %} ({{ d.last_wake_reason }}){% endif %}</td>
+          <td>
+            <form method="post" action="{{ url_for('wake_schedule.send') }}" class="form form--inline">{{ button('Send now', variant='ghost', icon='paper-plane-tilt') }}<input type="hidden" name="device_id" value="{{ d.id }}"></form>
+            <form method="post" action="{{ url_for('wake_schedule.toggle') }}" class="form form--inline">{{ button('Toggle', variant='ghost', icon='power') }}<input type="hidden" name="device_id" value="{{ d.id }}"></form>
+            <form method="post" action="{{ url_for('wake_schedule.remove') }}" class="form form--inline" onsubmit="return confirm('Remove {{ d.id }}?');">{{ button('Remove', variant='ghost danger', icon='trash') }}<input type="hidden" name="device_id" value="{{ d.id }}"></form>
+          </td>
+        </tr>
+        <tr>
+          <td colspan="5">
+            <form method="post" action="{{ url_for('wake_schedule.update') }}" class="form form--inline">
+              <input type="hidden" name="device_id" value="{{ d.id }}">
+              <input type="text" name="times" value="{{ d.times }}" aria-label="Wake times for {{ d.id }}" placeholder="08:30,12:00,18:00">
+              {{ button('Update', variant='ghost', icon='floppy-disk') }}
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>No devices configured yet. Add one below.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section id="ws-add" data-collapsible class="card">
+  {{ card_head('Add device', icon_name='plus', level=2, collapse='ws-add') }}
+  <div id="ws-add-body" data-collapsible-body>
+    <form method="post" action="{{ url_for('wake_schedule.add') }}" class="form">
+      <div class="field-grid">
+        {{ text_input('ws-device', 'device_id', 'Device id', placeholder='inky13') }}
+        {{ text_input('ws-times', 'times', 'Wake times (HH:MM, comma separated)', placeholder='08:30,12:00,18:00') }}
+      </div>
+      <div class="actions">{{ button('Add device', icon='plus') }}</div>
+    </form>
+  </div>
+</section>
+
+<section class="card">
+  {{ card_head('How it works', icon_name='question', level=2) }}
+  <div class="card-body">
+    <ol>
+      <li>The panel publishes a heartbeat on every wake, before it paints.</li>
+      <li>For a timer wake, the plugin computes the seconds to the next HH:MM in the list and publishes <code>{"sleep_s": N}</code> to <code>tesserae/&lt;device&gt;/cmd/sleep</code> (retained).</li>
+      <li>A button wake asks the same question: tap at 17:00 → sleep 1 h to 18:00; tap at 17:30 → sleep 30 min to 18:00.</li>
+      <li>The firmware applies the directive and clears the topic; a stale one is auto-cleared after 60 s.</li>
+    </ol>
+    <p class="field-help">Requires firmware <code>inky13-tesserae-0.3</code> or <code>paperless-L-tesserae</code>. Times use the Tesserae server's local timezone.</p>
+  </div>
+</section>
+{% endblock %}
